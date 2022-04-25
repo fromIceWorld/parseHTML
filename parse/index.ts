@@ -1,10 +1,5 @@
-enum NodeType {
-    Element = 1,
-    Attr,
-    Text = 3,
-    CDATASection,
-    Comment = 8,
-}
+import { elementType } from '../Enums/index';
+import { CommentTNode, ElementTNode, TextTNode } from '../render/tNode';
 class ElementError {
     position;
     description: string;
@@ -19,33 +14,6 @@ class position {
     constructor(row: number, col: number) {
         this.row = row;
         this.col = col;
-    }
-}
-class Element {
-    tagName: string;
-    attrArray: Array<string>;
-    close: boolean;
-    parent: any = null;
-    children: Array<any> = [];
-    NodeType = NodeType.Element;
-    constructor(tagName: string, attrArray: Array<string>, close: boolean) {
-        this.tagName = tagName;
-        this.attrArray = attrArray;
-        this.close = close;
-    }
-}
-class Text {
-    content: string;
-    NodeType = NodeType.Text;
-    constructor(content: string) {
-        this.content = content;
-    }
-}
-class Comment {
-    content: string;
-    NodeType = NodeType.Comment;
-    constructor(content: string) {
-        this.content = content;
     }
 }
 class ParseHTML {
@@ -100,8 +68,8 @@ class ParseHTML {
     }
     // 是否将节点推入栈中
     insert(element: any) {
-        let { NodeType: type, parent } = element;
-        if (type !== NodeType.Text && type !== NodeType.Comment) {
+        let { type, parent } = element;
+        if (type !== elementType.Text && type !== elementType.Comment) {
             this.elements.push(element);
         } else {
             if (!parent) {
@@ -158,16 +126,21 @@ class ParseHTML {
             elementText;
         if (endIndex == -1) {
             // 未找到标签，就是文本
-            elementText = new Text(this.origin.substring(this.startIndex));
+            elementText = new TextTNode(
+                this.origin.substring(this.startIndex).trim()
+            );
             this.startIndex = this.origin.length;
         } else {
-            elementText = new Text(
-                this.origin.substring(this.startIndex, endIndex)
+            elementText = new TextTNode(
+                this.origin.substring(this.startIndex, endIndex).trim()
             );
             this.startIndex = endIndex;
         }
-        // 将当前元素插入树
-        this.linkParentChild(elementText);
+        // 可能遇到无效文本:[\n]
+        if (elementText.source && elementText.source.trim()) {
+            // 将当前元素插入树
+            this.linkParentChild(elementText);
+        }
     }
     // 找到value的闭合区域： name = "**" 中的 value: "**"
     attemptValue(start: number) {
@@ -176,9 +149,9 @@ class ParseHTML {
     }
     // 开始标签
     attemptOpenTag() {
-        let from = (this.startIndex = 1); // 越过 '<'
+        let from = this.startIndex + 1; // 越过 '<'
         let key = '',
-            attrs = [];
+            attrs: Array<any> = [];
         let elementStart;
         while (from < this.origin.length) {
             let code = this.origin[from];
@@ -190,28 +163,22 @@ class ParseHTML {
                     key += code;
                     from++;
                 } else {
-                    // 存储 value值
-                    this.filterWhiteSpace(
-                        attrs,
-                        this.origin.substring(from, marksEnd + 1)
-                    );
+                    let value = this.origin.substring(from + 1, marksEnd);
+                    attrs.push(value);
                     from = marksEnd + 1;
                 }
-            } else if (code == ' ' || code == '=') {
-                if (key !== '') {
-                    attrs.push(key);
-                    key = '';
-                }
-                if (code == ' ') {
-                    from = this.crossWhiteSpace(from);
-                } else {
-                    attrs.push('=');
-                    from++;
-                }
-            } else if (code == '>') {
-                // 遇到结束符号>, 存储最后解析的属性
+            } else if (code == ' ') {
                 this.filterWhiteSpace(attrs, key);
-                from++;
+                key = '';
+                from = this.crossWhiteSpace(from);
+            } else if (code == '=') {
+                attrs.push(key, '=');
+                key = '';
+                from = this.crossWhiteSpace(from + 1);
+            } else if (code == '>') {
+                // 遇到结束符号>, 存储最后解析的属性,越过无效字符【' ','\n'】
+                this.filterWhiteSpace(attrs, key);
+                from = this.crossWhiteSpace(from + 1);
                 break;
             } else {
                 key += code;
@@ -220,7 +187,9 @@ class ParseHTML {
         }
         // 当解析属性时，越界，说明未遇到>,当前解析的字符非标签，而是文本
         if (from == this.origin.length) {
-            elementStart = new Text(this.origin.substring(this.startIndex));
+            elementStart = new TextTNode(
+                this.origin.substring(this.startIndex)
+            );
         } else {
             let tagName = attrs[0],
                 closed = attrs[attrs.length - 1] == '/',
@@ -230,12 +199,12 @@ class ParseHTML {
                 );
             if (tagName !== ' ') {
                 // 检测标签有效性
-                elementStart = new Element(tagName, attributes, closed);
+                elementStart = new ElementTNode(tagName, attributes);
                 // 自闭和标签
                 if (closed) {
                     this.closedElement(tagName);
                 } else {
-                    this.insert(elementStart);
+                    this.linkParentChild(elementStart);
                 }
                 // 移动光标
                 this.startIndex = from;
@@ -254,7 +223,7 @@ class ParseHTML {
                 this.startIndex + 4,
                 closedIndex
             );
-            let ElementComment = new Comment(content);
+            let ElementComment = new CommentTNode(content);
             this.linkParentChild(ElementComment);
             this.startIndex = closedIndex + 3;
         } else {
@@ -263,7 +232,7 @@ class ParseHTML {
     }
     // 去除多余空白字符
     crossWhiteSpace(start: number) {
-        while (this.origin[start] == ' ') {
+        while (this.origin[start] == ' ' || this.origin[start] == '\n') {
             start++;
         }
         return start;

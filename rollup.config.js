@@ -7,5 +7,11 @@ export default {
         format: 'umd',
         name: 'parseHTML',
     },
-    plugins: [resolve(), typescript()],
+    strict: false,
+    plugins: [
+        resolve(),
+        typescript({
+            downlevelIteration: true,
+        }),
+    ],
 };
