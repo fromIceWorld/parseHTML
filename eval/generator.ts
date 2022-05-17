@@ -13,7 +13,7 @@ class factory {
     events: Array<any> = [];
     params: Set<string> = new Set();
     Attributes: Array<Array<string | number>> = new Array();
-    createFn = ``;
+    createFn = `componentType.InstructionIFrameStates = cacheInstructionIFrameStates(componentType, attributes, ctx)\n`;
     updateFn = ``;
     template: any;
     elements: Array<Element> = new Array();
@@ -37,7 +37,7 @@ class factory {
                     this.createElement(element);
                     break;
                 case 3:
-                    this.createText(element);
+                    this.resolveText(element);
                     break;
             }
         }
@@ -59,13 +59,15 @@ class factory {
                     this.createElement(child);
                     break;
                 case 3:
-                    this.createText(child);
+                    this.resolveText(child);
                     break;
             }
         });
         this.closeElement(elementNode);
     }
+    handleText() {}
     handleAttributes(attrArray) {
+        let hasDynamicAtribute = false;
         // 初始化属性列
         this.dynamicStyle[this.elementIndex] = new Array();
         this.dynamicClass[this.elementIndex] = new Array();
@@ -80,6 +82,7 @@ class factory {
                         this.addListener(attrArray[i], attrArray[i + 2]);
                         break;
                     case '&':
+                        hasDynamicAtribute = true;
                         this.addDynamicAttrubute(
                             attrArray[i],
                             attrArray[i + 2]
@@ -95,7 +98,17 @@ class factory {
                 i++;
             }
         }
+        if (
+            this.dynamicStyle[this.elementIndex].length > 0 &&
+            this.dynamicClass[this.elementIndex].length > 0 &&
+            this.dynamicAttrubutes[this.elementIndex].length > 0
+        ) {
+            this.createFn += `property(${this.elementIndex})`;
+        }
         this.createAttribute(this.elementIndex);
+        if (hasDynamicAtribute) {
+            this.updateProperty();
+        }
     }
     closeElement(elementNode) {
         this.params.add('elementEnd');
@@ -104,18 +117,32 @@ class factory {
     }
     setStaticAttribute() {}
     setDynamicAttribute() {}
-    // 创建文本
-    createText(element) {
-        this.params.add('text');
-        let { source } = element;
-        let fn = `text('${source}', ${this.elementIndex});\n`;
-        this.createFn += fn;
+    // resolveText(element){
+    //     let {source, }
+    // }
+    // 解析 文本
+    resolveText(text) {
+        let { source, bindings, tokens } = text;
+        this.Attributes[this.elementIndex] = [source, bindings, tokens];
+        if (bindings.length > 0) {
+            this.createText(source);
+            this.updateText(tokens);
+        } else {
+            this.createText(source);
+        }
         this.elementIndex++;
     }
+    // 创建文本
+    createText(expression: string) {
+        this.params.add('creatText');
+        let fn = `creatText(${this.elementIndex},'${expression}');\n`;
+        this.createFn += fn;
+    }
     // 更新文本
-    updateText(index) {
-        this.params.add('text');
-        let fn = `text(${index})`;
+    updateText(tokens) {
+        this.params.add('updateText');
+        let fn = `updateText(${this.elementIndex},${tokens.join(',')})`;
+        this.updateFn += fn;
     }
     addStaticAttrubute(key, value) {
         let attribute = this.stacticAttrubutes[this.elementIndex];
@@ -124,14 +151,37 @@ class factory {
     addDynamicAttrubute(key, value) {
         let styles = this.dynamicStyle[this.elementIndex],
             classes = this.dynamicStyle[this.elementIndex],
-            dynamicAttrubutes = this.dynamicAttrubutes[this.elementIndex];
-        if (key == '&style') {
+            dynamicAttrubutes = this.dynamicAttrubutes[this.elementIndex],
+            keyName = key.substring(1),
+            propertyType;
+
+        if (keyName == 'style') {
             styles.push(value);
-        } else if (key == '&class') {
+            propertyType = AttributeType.dynamicStyle;
+        } else if (keyName == 'class') {
             classes.push(value);
+            propertyType = AttributeType.dynamicClass;
         } else {
-            dynamicAttrubutes.push(key.substring(1), value);
+            dynamicAttrubutes.push(keyName, value);
+            propertyType = AttributeType.dynamicAttrubute;
         }
+        this.addProperty(keyName, value, propertyType);
+    }
+    addProperty(key, value, propertyType) {
+        this.params.add('propertyFn');
+        this.params.add('updateProperty');
+        let start = value.startsWith('{') ? '(' : '',
+            end = value.startsWith('{') ? ')' : '';
+        // 根据表达式，直接生成目的值
+        let target = `(context)=>{
+            with(context){
+                return eval('${start}' + '${value}' + '${end}')
+            }
+        }`;
+        this.createFn += `propertyFn(${this.elementIndex},${propertyType},'${key}',${target})\n`;
+    }
+    updateProperty() {
+        this.updateFn += `updateProperty(${this.elementIndex})\n`;
     }
     // 为节点添加事件【解析对应的函数】
     addListener(eventName, callback) {
@@ -171,24 +221,26 @@ class factory {
         if (this.dynamicStyle[index].length > 0) {
             this.Attributes[index].push(
                 AttributeType.dynamicStyle,
+                'style',
                 ...this.dynamicStyle[index]
             );
         }
         if (this.dynamicClass[index].length > 0) {
             this.Attributes[index].push(
                 AttributeType.dynamicClass,
+                'class',
                 ...this.dynamicClass[index]
             );
         }
         if (this.dynamicAttrubutes[index].length > 0) {
             this.Attributes[index].push(
-                AttributeType.staticAttribute,
+                AttributeType.dynamicAttrubute,
                 ...this.dynamicAttrubutes[index]
             );
         }
         if (this.events[index].length > 0) {
             this.Attributes[index].push(
-                AttributeType.events,
+                AttributeType.event,
                 ...this.events[index]
             );
         }
@@ -196,10 +248,14 @@ class factory {
     createComponent() {
         let componentDef = (this.componentDef = new Function(
             ...this.params,
+            'cacheInstructionIFrameStates',
+            'componentType',
             `
+            let selector = '${this.selector}',
+                attributes = ${JSON.stringify(this.Attributes)};
             return {
-                selector:'${this.selector}',
-                attributes:[${JSON.stringify(this.Attributes)}],
+                selector,
+                attributes,
                 template:${this.template}
             }
         `

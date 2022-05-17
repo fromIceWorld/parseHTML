@@ -1,4 +1,35 @@
-import { elementType } from '../Enums/index';
+import { AttributeType, elementType } from '../Enums/index';
+import { TemplateView } from './View';
+interface Attributes {
+    [prop: string]: {
+        preValue: any;
+        currentValue: any;
+    };
+}
+/**
+ * dynamicAttrubute: [{key,fn}]
+ * dynamicStyle: [fn]
+ * dynamicClass: [fn]
+ */
+class TNode {
+    tagName: string;
+    attributes: Object;
+    directives = [];
+    components = [];
+    TView;
+    dynamicAttributesFn = Array.from(new Array(3), () => new Array());
+    constructor(tagName: string, attributes: Object) {
+        this.tagName = tagName;
+        this.attributes = attributes;
+    }
+    addDynamicAttrubute(type: number, key: string, fn: Function) {
+        if (type == AttributeType.dynamicAttrubute) {
+            this.dynamicAttributesFn[type].push({ key, fn });
+        } else {
+            this.dynamicAttributesFn[type].push(fn);
+        }
+    }
+}
 
 class ElementTNode {
     tagName?: string;
@@ -13,6 +44,7 @@ class ElementTNode {
         this.attributes = attributes;
     }
 }
+// 根据输入字符串，将动态数据与静态数据分割
 class TextTNode {
     source: string;
     expression: string = '';
@@ -21,6 +53,34 @@ class TextTNode {
     type = elementType.Text;
     constructor(source: string) {
         this.source = source;
+        this.splitText();
+    }
+    splitText() {
+        let i = 0,
+            j = this.source.length - 1;
+        while (i < j) {
+            let BracesLeft = this.source.indexOf('{{', i),
+                BracesRight = -1;
+            if (BracesLeft >= 0) {
+                BracesRight = this.source.indexOf('}}', BracesLeft);
+            }
+            if (BracesLeft >= 0 && BracesRight >= 0) {
+                this.tokens.push(`"${this.source.substring(i, BracesLeft)}"`);
+                this.tokens.push(
+                    `ctx["${this.source.substring(
+                        BracesLeft + 2,
+                        BracesRight
+                    )}"]`
+                );
+                this.bindings.push(
+                    `${this.source.substring(BracesLeft + 2, BracesRight)}`
+                );
+                i = BracesRight + 2;
+            } else {
+                this.tokens.push(`"${this.source.substring(i)}"`);
+                i = j;
+            }
+        }
     }
 }
 class CommentTNode {
@@ -30,11 +90,11 @@ class CommentTNode {
         this.source = source;
     }
 }
-function getOrCreateTNode(tagName: string, index: number, LView) {
-    if (LView[index + 20]) {
-        return LView[index + 20];
+function getOrCreateTNode(tagName: string, index: number, TView: TemplateView) {
+    if (TView[index + 20]) {
+        return TView[index + 20];
     } else {
-        return (LView[index + 20] = new Tn());
+        // return (LView[index + 20] = new Tn());
     }
 }
-export { ElementTNode, TextTNode, CommentTNode, getOrCreateTNode };
+export { TNode, ElementTNode, TextTNode, CommentTNode, getOrCreateTNode };

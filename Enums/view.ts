@@ -1,10 +1,18 @@
-enum TView {
+enum TViewIndex {
+    Host,
+    RootElements,
     LView,
+    Class,
+    Parent,
+    Context,
+    Children,
     Render,
     Directives,
-    componentDef,
+    ComponentDef,
+    Attributes,
+    Slots,
 }
-enum LView {
+enum LViewIndex {
     Render,
 }
-export { TView, LView };
+export { TViewIndex, LViewIndex };

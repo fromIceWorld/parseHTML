@@ -1,8 +1,15 @@
 enum AttributeType {
-    staticAttribute,
+    dynamicAttrubute,
     dynamicStyle,
     dynamicClass,
-    dynamicAttrubutes,
-    events,
+    staticAttribute,
+    style,
+    class,
+    event,
 }
-export { AttributeType };
+enum DynamicType {
+    dynamicAttrubute,
+    dynamicStyle,
+    dynamicClass,
+}
+export { AttributeType, DynamicType };
