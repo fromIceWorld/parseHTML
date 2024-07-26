@@ -16,7 +16,7 @@ class TNode {
     attributes: Object;
     directives = [];
     components = [];
-    TView;
+    TView?: TemplateView;
     dynamicAttributesFn = Array.from(new Array(3), () => new Array());
     constructor(tagName: string, attributes: Object) {
         this.tagName = tagName;

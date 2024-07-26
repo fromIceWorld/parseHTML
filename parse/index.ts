@@ -1,52 +1,44 @@
-import { elementType } from '../Enums/index';
-import { CommentTNode, ElementTNode, TextTNode } from '../render/tNode';
-class ElementError {
-    position;
-    description: string;
-    constructor(position: { row: number; col: number }, description: string) {
-        this.position = position;
-        this.description = description;
-    }
-}
-class position {
-    row;
-    col;
-    constructor(row: number, col: number) {
-        this.row = row;
-        this.col = col;
-    }
-}
-class ParseHTML {
-    root: Array<Element> = [];
+import { InjectionToken } from '../Injector/index';
+import { elementType } from './Enum/index';
+import { Position } from './position/index';
+import { CommentTNode, ElementTNode, TextTNode } from './TNode/index';
+const EscapeCharacter = ['\n'];
+/**
+ * @param template html字符串
+ */
+class ParseTemplate {
+    template: string;
     startIndex = 0;
-    origin: string = '';
+    endIndex: number;
     row = 1;
-    col = 1;
+    column = 1;
+    root: Array<Element> = [];
     elements: Array<any> = [];
     errors: Array<any> = [];
-    constructor(origin: string) {
-        this.origin = origin;
+    constructor(template: string) {
+        this.template = template;
+        this.endIndex = template.length - 1;
         this.parse();
     }
     parse() {
-        while (this.startIndex < this.origin.length) {
+        while (this.startIndex <= this.endIndex) {
             // 以 <开头的 标签
-            if (this.origin[this.startIndex] == '<') {
-                if (this.origin.startsWith('<!--', this.startIndex)) {
+            if (this.template[this.startIndex] == '<') {
+                if (this.template.startsWith('<!--', this.startIndex)) {
                     // 注释
                     this.attempNotes();
                 } else if (
-                    this.startIndex + 2 < this.origin.length &&
-                    this.origin[this.startIndex + 1] == '/' &&
-                    this.origin[this.startIndex + 1] !== ' '
+                    this.startIndex + 2 <= this.endIndex &&
+                    this.template[this.startIndex + 1] == '/' &&
+                    this.template[this.startIndex + 1] !== ' '
                 ) {
                     // 闭合标签
                     this.attemptClosedElement();
                 } else if (
-                    this.startIndex + 1 < this.origin.length &&
-                    this.origin[this.startIndex + 1] !== ' '
+                    this.startIndex + 1 <= this.endIndex &&
+                    this.template[this.startIndex + 1] !== ' '
                 ) {
-                    // 无效的标签，就是文本 =>【< div>】
+                    // 可能是标签 <div>
                     this.attemptOpenTag();
                 } else {
                     // 无效的标签，就是文本 =>【< div>】
@@ -57,6 +49,7 @@ class ParseHTML {
                 this.attempText();
             }
         }
+        console.log(this);
     }
     linkParentChild(element: any) {
         if (this.elements.length > 0) {
@@ -84,111 +77,147 @@ class ParseHTML {
         }
     }
     closedElement(tagName: string) {
+        let endPosition = this.position();
         if (this.elements.length > 0) {
             if (this.elements[this.elements.length - 1].tagName == tagName) {
                 let element = this.elements.pop();
+                element.endPosition = endPosition;
+                this.column++;
                 if (this.elements.length == 0) {
                     this.root.push(element);
                 }
-            } else {
-                this.cacheError(tagName, this.row, this.col);
+                return;
             }
-        } else {
-            this.cacheError(tagName, this.row, this.col);
         }
+        // throw Error(
+        //     `${tagName} 未找到匹配的开始标签。行:${this.row};列:${this.column};`
+        // );
     }
-    cacheError(tagName: string, row: number, col: number) {
-        this.errors.push(
-            new ElementError(
-                new position(row, col),
-                `${tagName} 未找到开始标签`
-            )
-        );
-    }
-    // 闭合标签
+    // 闭合标签: </tagName>
     attemptClosedElement() {
-        let endIndex = this.origin.indexOf('>', this.startIndex);
-        if (endIndex == -1) {
-            this.attempText();
-        } else {
-            let closeTagName = this.origin.substring(
+        let closed = this.matchString('>');
+        if (closed) {
+            let { index, nextColumn, nextRow } = closed;
+            let closeTagName = this.template.substring(
                 this.startIndex + 2,
-                endIndex
+                index
             );
-            this.startIndex = endIndex + 1;
+            this.row = nextRow;
+            this.column = nextColumn;
+            this.startIndex = index + 1;
             this.closedElement(closeTagName);
+        } else {
+            this.attempText();
         }
     }
     // 处理文本数据
     attempText() {
         // 找下一个 <
-        let endIndex = this.origin.indexOf('<', this.startIndex + 1),
+        let nextTag = this.matchString('<'),
+            startPosition = this.position(),
+            endPosition,
             elementText;
-        if (endIndex == -1) {
-            // 未找到标签，就是文本
+        if (nextTag) {
+            let { index, nextColumn, nextRow } = nextTag;
+            endPosition = this.position(nextRow, nextColumn);
             elementText = new TextTNode(
-                this.origin.substring(this.startIndex).trim()
+                this.template.substring(this.startIndex, index).trim(),
+                startPosition,
+                endPosition
             );
-            this.startIndex = this.origin.length;
+            this.row = nextRow;
+            this.column = nextColumn;
+            this.startIndex = index;
         } else {
+            endPosition = this.position(Infinity, Infinity);
             elementText = new TextTNode(
-                this.origin.substring(this.startIndex, endIndex).trim()
+                this.template.substring(this.startIndex).trim(),
+                startPosition,
+                endPosition
             );
-            this.startIndex = endIndex;
+            this.column = Infinity;
+            this.startIndex = this.template.length;
         }
         // 可能遇到无效文本:[\n]
-        if (elementText.source && elementText.source.trim()) {
+        if (elementText.content && elementText.content.trim()) {
             // 将当前元素插入树
             this.linkParentChild(elementText);
         }
     }
     // 找到value的闭合区域： name = "**" 中的 value: "**"
     attemptValue(start: number) {
-        let endIndex = this.origin.indexOf(this.origin[start], start + 1);
+        let endIndex = this.template.indexOf(this.template[start], start + 1);
         return endIndex;
     }
     // 开始标签
     attemptOpenTag() {
-        let from = this.startIndex + 1; // 越过 '<'
+        let from = this.startIndex + 1,
+            row = this.row,
+            column = this.column; // 越过 '<'
         let key = '',
             attrs: Array<any> = [];
         let elementStart;
-        while (from < this.origin.length) {
-            let code = this.origin[from];
+        while (from <= this.endIndex) {
+            let code = this.template[from];
             // 处理单/双引号
             if (code == '"' || code == "'") {
-                let marksEnd = this.attemptValue(from);
-                // 无闭合的双引号，就是文本
-                if (marksEnd == -1) {
+                let marks = this.matchString(code, from + 1, column, row);
+                if (marks) {
+                    let { index, nextColumn, nextRow } = marks;
+                    let value = this.template.substring(from + 1, index);
+                    column = nextColumn;
+                    row = nextRow;
+                    attrs.push(value);
+                    from = index + 1;
+                } else {
+                    // 无闭合的双引号，就是文本
                     key += code;
                     from++;
-                } else {
-                    let value = this.origin.substring(from + 1, marksEnd);
-                    attrs.push(value);
-                    from = marksEnd + 1;
+                    column++;
                 }
-            } else if (code == ' ') {
-                this.filterWhiteSpace(attrs, key);
-                key = '';
-                from = this.crossWhiteSpace(from);
-            } else if (code == '=') {
-                attrs.push(key, '=');
-                key = '';
-                from = this.crossWhiteSpace(from + 1);
-            } else if (code == '>') {
-                // 遇到结束符号>, 存储最后解析的属性,越过无效字符【' ','\n'】
-                this.filterWhiteSpace(attrs, key);
-                from = this.crossWhiteSpace(from + 1);
-                break;
+            } else if (
+                code == ' ' ||
+                code == '\n' ||
+                code == '=' ||
+                code == '>'
+            ) {
+                if (code == ' ' || code == '\n') {
+                    if (code == '\n') {
+                        row++;
+                        column = 1;
+                    }
+                    this.filterWhiteSpace(attrs, key);
+                    key = '';
+                } else if (code == '=') {
+                    attrs.push(key, '=');
+                    key = '';
+                } else if (code == '>') {
+                    // 遇到结束符号>, 存储最后解析的属性,越过无效字符【' ','\n'】
+                    this.filterWhiteSpace(attrs, key);
+                    from++;
+                    column++;
+                    break;
+                }
+                let { nextFrom, nextColumn, nextRow } = this.crossWhiteSpace(
+                    from + 1,
+                    row,
+                    column + 1
+                );
+                from = nextFrom;
+                column = nextColumn;
+                row = nextRow;
             } else {
                 key += code;
                 from++;
+                column++;
             }
         }
         // 当解析属性时，越界，说明未遇到>,当前解析的字符非标签，而是文本
-        if (from == this.origin.length) {
+        if (from == this.template.length) {
             elementStart = new TextTNode(
-                this.origin.substring(this.startIndex)
+                this.template.substring(this.startIndex),
+                this.position(row, column),
+                this.position(Infinity, Infinity)
             );
         } else {
             let tagName = attrs[0],
@@ -198,8 +227,15 @@ class ParseHTML {
                     closed ? attrs.length - 1 : attrs.length
                 );
             if (tagName !== ' ') {
+                let startPosition = this.position();
+                this.row = row;
+                this.column = column;
                 // 检测标签有效性
-                elementStart = new ElementTNode(tagName, attributes);
+                elementStart = new ElementTNode(
+                    tagName,
+                    attributes,
+                    startPosition
+                );
                 // 自闭和标签
                 if (closed) {
                     this.closedElement(tagName);
@@ -217,25 +253,89 @@ class ParseHTML {
     // 解析注释
     attempNotes() {
         // 注释/文本
-        let closedIndex = this.origin.indexOf('-->', this.startIndex);
-        if (closedIndex !== -1) {
-            let content = this.origin.substring(
-                this.startIndex + 4,
-                closedIndex
-            );
-            let ElementComment = new CommentTNode(content);
+        let closed = this.matchString('-->');
+        if (closed) {
+            let { index, nextRow, nextColumn } = closed;
+            let startoPosition = this.position(),
+                content = this.template.substring(this.startIndex + 4, index);
+            this.column = nextColumn;
+            this.row = nextRow;
+            let endPosition = this.position(),
+                ElementComment = new CommentTNode(
+                    content,
+                    startoPosition,
+                    endPosition
+                );
             this.linkParentChild(ElementComment);
-            this.startIndex = closedIndex + 3;
+            this.startIndex = index + 3;
+            this.column++;
         } else {
             this.attempText();
         }
     }
+    /**
+     * 替代 indexOf函数【需要统计 row，column】
+     *
+     * @param str 查找的目标字符
+     * @param from 起始点
+     * @param column 行
+     * @param row 列
+     * @returns  index 目标索引; nextRow:行; nextColumn:列; offset: 下一个起始点
+     *
+     */
+    matchString(
+        str: string,
+        from = this.startIndex,
+        column = this.column,
+        row = this.row
+    ) {
+        let length = str.length;
+        let i = from,
+            j = from + length;
+        while (i <= this.endIndex) {
+            if (this.template.substring(i, j) == str) {
+                return {
+                    index: i,
+                    nextRow: row,
+                    nextColumn: column + length - 1,
+                };
+            } else {
+                // 换行字符
+                if (EscapeCharacter.includes(this.template[i])) {
+                    row++;
+                    column = 1;
+                } else {
+                    column++;
+                }
+            }
+            i++;
+            j++;
+        }
+        return false;
+    }
+    position(row = this.row, column = this.column) {
+        return new Position(row, column);
+    }
     // 去除多余空白字符
-    crossWhiteSpace(start: number) {
-        while (this.origin[start] == ' ' || this.origin[start] == '\n') {
+    crossWhiteSpace(start: number, row: number, column: number) {
+        while (this.template[start] == ' ' || this.template[start] == '\n') {
+            if (this.template[start] == ' ') {
+                column++;
+            }
+            if (this.template[start] == '\n') {
+                row++;
+                column = 1;
+            }
             start++;
         }
-        return start;
+        return {
+            nextFrom: start,
+            nextRow: row,
+            nextColumn: column,
+        };
     }
 }
-export { ParseHTML };
+window['parse'] = ParseTemplate;
+const Parse = new InjectionToken('依据特定规则解析html的class');
+
+export { ParseTemplate as ParseHtml, Parse };

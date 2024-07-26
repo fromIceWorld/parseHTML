@@ -1,8 +1,9 @@
 import { TViewIndex } from '../Enums/index';
-import { popContext, pushContext } from '../eval/$element';
+import { compiler } from '../eval/generator';
+import { Instruction } from '../eval/instructions';
 const offset = 20;
-class TemplateView {
-    [TViewIndex.Host] = null;
+class TemplateView extends Array {
+    [TViewIndex.Host]: Element;
     [TViewIndex.RootElements] = new Array();
     [TViewIndex.Class] = null;
     [TViewIndex.LView] = new Array();
@@ -13,13 +14,27 @@ class TemplateView {
     [TViewIndex.ComponentDef] = new Array();
     [TViewIndex.Attributes] = new Array();
     [TViewIndex.Slots] = new Array();
-    constructor() {}
+    [TViewIndex.Compiler]: compiler;
+
+    constructor() {
+        super();
+        Object['setPrototypeOf'](this, TemplateView.prototype);
+    }
+    $getDefinition = (() => {
+        let def: { template: Function };
+        return () => {
+            if (!def) {
+                def = this[TViewIndex.Compiler].transform(
+                    this[TViewIndex.Class]
+                );
+            }
+            return def;
+        };
+    })();
     // 初始阶段，将view添加到 检测树
     attach() {
-        pushContext(this);
-        console.log(this);
-        let def = this[TViewIndex.Class].$getDefinition();
-        console.log(def);
+        Instruction.pushContext(this);
+        let def = this.$getDefinition();
         def.template(1, this[TViewIndex.Context]);
         let children = this[TViewIndex.ComponentDef];
         for (let child of children) {
@@ -27,25 +42,26 @@ class TemplateView {
             tView.attach();
         }
         this[TViewIndex.Host].append(...this[TViewIndex.RootElements]);
-        popContext();
+        Instruction.popContext();
     }
     // 变更检测
     detectChanges() {
-        pushContext(this);
-        let def = this[TViewIndex.Class].$getDefinition();
+        Instruction.pushContext(this);
+        let def = this.$getDefinition();
         def && def.template(2, this[TViewIndex.Context]);
         for (let child of this[TViewIndex.ComponentDef]) {
             let tView = this[child + offset];
             tView.detectChanges();
         }
-        popContext();
+        Instruction.popContext();
     }
+    // 检测子视图
     checkChildren() {
         for (let child of this[TViewIndex.ComponentDef]) {
             let tView = this[child + offset];
-            pushContext(tView);
+            Instruction.pushContext(tView);
             tView.detectChanges();
-            popContext();
+            Instruction.popContext();
         }
     }
 }

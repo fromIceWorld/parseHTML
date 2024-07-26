@@ -1,6 +1,6 @@
 import { AttributeType } from '../Enums/index';
-import { ParseHTML } from '../parse/index';
-export { factory };
+import { InjectionToken } from '../Injector/index';
+import { ParseHtml } from '../parse/index';
 // 根据元素的属性，将静态，动态属性分离，生成create，update指令集，指向对应属性
 class factory {
     selector;
@@ -17,8 +17,8 @@ class factory {
     updateFn = ``;
     template: any;
     elements: Array<Element> = new Array();
-    componentDef?: Object;
-    constructor(htmlTokens: ParseHTML, selector: string) {
+    componentDef: Function | null;
+    constructor(htmlTokens: ParseHtml, selector: string) {
         this.origin = htmlTokens;
         this.selector = selector;
     }
@@ -122,13 +122,13 @@ class factory {
     // }
     // 解析 文本
     resolveText(text) {
-        let { source, bindings, tokens } = text;
-        this.Attributes[this.elementIndex] = [source, bindings, tokens];
+        let { content, bindings = [], tokens = [] } = text;
+        this.Attributes[this.elementIndex] = [content, bindings, tokens];
         if (bindings.length > 0) {
-            this.createText(source);
+            this.createText(content);
             this.updateText(tokens);
         } else {
-            this.createText(source);
+            this.createText(content);
         }
         this.elementIndex++;
     }
@@ -169,18 +169,16 @@ class factory {
     }
     addProperty(key, value, propertyType) {
         this.params.add('propertyFn');
-        this.params.add('updateProperty');
-        let start = value.startsWith('{') ? '(' : '',
-            end = value.startsWith('{') ? ')' : '';
         // 根据表达式，直接生成目的值
         let target = `(context)=>{
             with(context){
-                return eval('${start}' + '${value}' + '${end}')
+                return ${value}
             }
         }`;
         this.createFn += `propertyFn(${this.elementIndex},${propertyType},'${key}',${target})\n`;
     }
     updateProperty() {
+        this.params.add('updateProperty');
         this.updateFn += `updateProperty(${this.elementIndex})\n`;
     }
     // 为节点添加事件【解析对应的函数】
@@ -247,7 +245,7 @@ class factory {
     }
     createComponent() {
         let componentDef = (this.componentDef = new Function(
-            ...this.params,
+            ...Array.from(this.params),
             'cacheInstructionIFrameStates',
             'componentType',
             `
@@ -263,3 +261,42 @@ class factory {
         console.log(componentDef);
     }
 }
+class compiler {
+    parse;
+    instructionFns;
+    factory;
+    constructor(
+        parse: typeof ParseHtml,
+        instructionFns: Object,
+        factory: factory
+    ) {
+        this.parse = parse;
+        this.instructionFns = instructionFns;
+        this.factory = factory;
+    }
+    transform(component) {
+        let { selector, template } = component;
+        let htmlTokens = new this.parse(template);
+        let componentFactory = new factory(htmlTokens, selector);
+        componentFactory.createFactory();
+        let paramsOfInstructionKey = Array.from(componentFactory.params).concat(
+                'cacheInstructionIFrameStates'
+            ),
+            paramsOfInstruction = [];
+        for (let key of paramsOfInstructionKey) {
+            paramsOfInstruction.push(this.instructionFns[key as keyof Object]);
+        }
+        // 运行构造函数【生成组件的指令集函数】
+        let componentDef = componentFactory.componentDef(
+            ...paramsOfInstruction,
+            component
+        );
+        console.log(componentDef);
+        return componentDef;
+    }
+}
+const factoryToken = new InjectionToken('编译转换函数,将html转换为指令集'),
+    compilerToken = new InjectionToken(
+        '组合指令集,收集[parse,factory,Instruction] 生成 compiler函数'
+    );
+export { factory, factoryToken, compiler, compilerToken };

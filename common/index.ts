@@ -1,7 +1,8 @@
-// 属性选择器 [name="**"]
-// id选择器 "#id"
-// class选择器 ".className"
-// 节点选择器 "div"
+/**
+ * 属性选择器,id选择器,class选择器,节点选择器
+ * @param selector [name="**"], #id, .classNameme, div
+ * @returns
+ */
 function resolveSelector(selector: string) {
     let kv = [];
     let pre = selector[0];

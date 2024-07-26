@@ -11,6 +11,9 @@ enum TViewIndex {
     ComponentDef,
     Attributes,
     Slots,
+    Injector,
+    Declarations,
+    Compiler,
 }
 enum LViewIndex {
     Render,
